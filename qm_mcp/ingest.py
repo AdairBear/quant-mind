@@ -10,6 +10,10 @@ embedding — everything the query layer needs, none of the fragile tree.
 
 All entry points are async (the fetch/format layer is async); the MCP server
 awaits them and the CLI wraps them in ``asyncio.run``.
+
+When ``QM_USE_LLAMA_INDEX=true`` is set, the LlamaIndex engine is invalidated
+after every successful ingest so the next query triggers a fresh index build
+with the updated corpus.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,6 +44,26 @@ from quantmind.preprocess.format import html_to_markdown, pdf_to_markdown
 _INGEST_LOG = "ingestion_log.jsonl"
 # Cap the markdown we persist per item (text only, lives outside git).
 _MARKDOWN_STORE_LIMIT = 400_000
+
+
+def _maybe_invalidate_llamaindex() -> None:
+    """Invalidate the LlamaIndex engine when the feature flag is active.
+
+    Called after every successful ingest so the next query rebuilds the index
+    with the updated corpus. No-op when ``QM_USE_LLAMA_INDEX`` is unset.
+    """
+    if os.environ.get("QM_USE_LLAMA_INDEX", "").lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+    try:
+        from qm_mcp.llamaindex.engine import invalidate_engine
+
+        invalidate_engine()
+    except Exception:
+        pass  # LlamaIndex not installed; ignore silently
 
 
 # ── format helper ──────────────────────────────────────────────────────
@@ -154,6 +179,10 @@ async def _persist(
     vector = await asyncio.to_thread(embed_text, embed_blob)
     store.add(record, vector)
     _append_ingestion_log(record)
+
+    # Invalidate LlamaIndex so next query rebuilds with the new item.
+    _maybe_invalidate_llamaindex()
+
     return {
         "id": item_id,
         "status": "ingested",
@@ -170,6 +199,7 @@ async def _persist(
 async def ingest_arxiv(
     arxiv_id: str, *, store: CorpusStore | None = None, force: bool = False
 ):
+    """Ingest an arXiv paper by id or URL."""
     load_secrets()
     store = store or CorpusStore()
     raw = await fetch_arxiv(arxiv_id)
@@ -197,6 +227,7 @@ async def ingest_arxiv(
 async def ingest_url(
     url: str, *, store: CorpusStore | None = None, force: bool = False
 ):
+    """Ingest a web page or hosted PDF by URL."""
     load_secrets()
     store = store or CorpusStore()
     raw = await fetch_url(url)
@@ -214,6 +245,7 @@ async def ingest_url(
 async def ingest_pdf(
     path: str, *, store: CorpusStore | None = None, force: bool = False
 ):
+    """Ingest a local PDF / HTML / Markdown file by filesystem path."""
     load_secrets()
     store = store or CorpusStore()
     abspath = str(Path(path).expanduser().resolve())
@@ -242,6 +274,7 @@ async def ingest_text(
     store: CorpusStore | None = None,
     force: bool = False,
 ):
+    """Ingest pasted raw text as a corpus item."""
     load_secrets()
     store = store or CorpusStore()
     key = (

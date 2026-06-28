@@ -44,6 +44,25 @@ full = [
     "beautifulsoup4>=4.12.0",
     "sentence-transformers>=2.2.0",
 ]
+# Phase 1 LlamaIndex narrow integration — local retrieval, no LLM, no paid services.
+# Install with: uv pip install -e ".[llamaindex]"
+# Activation: set QM_USE_LLAMA_INDEX=true at runtime.
+#
+# Dependency justifications (Karpathy Rule VIII):
+#   llama-index-core: MIT/Apache-2.0. Provides SimpleVectorStore + retrieval
+#     pipeline. Transitive: numpy (already in deps), pydantic v2 (already in
+#     deps), typing-extensions, SQLite via stdlib. No network at query time.
+#   llama-index-embeddings-huggingface: Apache-2.0. Thin wrapper around
+#     sentence-transformers for the HuggingFace model hub.
+#   sentence-transformers: Apache-2.0. Pulls torch (BSD, ~2 GB wheel).
+#     One-time cost; zero per-call API cost vs OpenAI billing.
+#   BAAI/bge-base-en-v1.5 model: MIT, ~438 MB, downloaded once to
+#     ~/.cache/huggingface/hub/ and cached for all subsequent runs.
+llamaindex = [
+    "llama-index-core>=0.12,<1.0",
+    "llama-index-embeddings-huggingface>=0.4",
+    "sentence-transformers>=3.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
