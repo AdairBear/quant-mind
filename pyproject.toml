@@ -60,8 +60,12 @@ full = [
 #     ~/.cache/huggingface/hub/ and cached for all subsequent runs.
 llamaindex = [
     "llama-index-core>=0.12,<1.0",
-    "llama-index-embeddings-huggingface>=0.4",
-    "sentence-transformers>=3.0",
+    # fastembed uses ONNX Runtime (no torch dependency) and avoids the
+    # numpy 1.x / 2.x ABI conflict that breaks sentence-transformers on
+    # Intel macOS (torch <=2.2.2, the last wheel built for x86_64 Darwin).
+    # BAAI/bge-base-en-v1.5 is in FastEmbed's supported-models list.
+    "llama-index-embeddings-fastembed>=0.4",
+    "fastembed>=0.6",
 ]
 
 [tool.setuptools.packages.find]

@@ -13,23 +13,24 @@ you don't control; justify each transitive pull):
     Provides SimpleVectorStore (in-memory + disk persistence via JSON) and
     the retrieval pipeline. Transitive pulls: numpy (already in deps),
     pydantic v2 (already in deps), SQLite via stdlib, typing-extensions.
-    No network at runtime — only the one-time HuggingFace model download.
+    No network at runtime — only the one-time ONNX model download.
 
-``llama-index-embeddings-huggingface`` (Apache-2.0):
-    Thin wrapper around sentence-transformers. Accepted because sentence-
-    transformers is the de-facto standard for local embedding models; no
-    viable lighter alternative that runs BAAI/bge at this quality tier.
+``llama-index-embeddings-fastembed`` (Apache-2.0):
+    Thin LlamaIndex wrapper around FastEmbed. Chosen over
+    llama-index-embeddings-huggingface + sentence-transformers because FastEmbed
+    uses ONNX Runtime and does NOT depend on torch. This sidesteps the
+    numpy 1.x / 2.x C-ABI conflict that breaks torch 2.2.2 (the last Intel
+    macOS wheel) against numpy >=2.0 (required by the main quantmind deps).
 
-``sentence-transformers`` (Apache-2.0) + ``torch`` (BSD):
-    torch is large (~2 GB wheel). One-time cost. Zero per-call API cost
-    versus OpenAI text-embedding-3-small's per-token billing. CPU-only
-    inference on the Mac dev machine is fast enough for <200 corpus items.
+``fastembed`` (Apache-2.0):
+    ONNX Runtime-backed embedding library. BAAI/bge-base-en-v1.5 is in its
+    supported-models list. Downloads a quantized ONNX model (~130 MB) once
+    to ``~/.cache/fastembed/`` and serves inference fully offline thereafter.
+    Zero per-call API cost vs OpenAI billing; ~3–6× smaller download than the
+    full PyTorch HuggingFace weights (~438 MB).
 
-``BAAI/bge-base-en-v1.5`` (MIT, ~438 MB):
-    768-dim encoder, strong MTEB performance on retrieval tasks. Preferred
-    over bge-small-en-v1.5 (384-dim) per task spec — slightly larger model
-    for better precision on dense quant-finance vocabulary. Downloaded once
-    to ``~/.cache/huggingface/hub/``; cached for all subsequent runs.
+``BAAI/bge-base-en-v1.5`` (MIT):
+    768-dim encoder, strong MTEB performance on retrieval tasks.
 """
 
 from __future__ import annotations
@@ -103,20 +104,22 @@ class LlamaIndexEngine:
 
     @staticmethod
     def _configure_settings() -> None:
-        """Set LlamaIndex globals: BAAI embeddings, no LLM."""
+        """Set LlamaIndex globals: BAAI/fastembed embeddings, no LLM."""
         from llama_index.core import Settings  # type: ignore[import-untyped]
-        from llama_index.embeddings.huggingface import (  # type: ignore[import-untyped]
-            HuggingFaceEmbedding,
+        from llama_index.embeddings.fastembed import (  # type: ignore[import-untyped]
+            FastEmbedEmbedding,
         )
 
-        current = getattr(Settings, "embed_model", None)
-        if not isinstance(current, HuggingFaceEmbedding):
+        # Check private attr to avoid triggering lazy default-embed resolution
+        # (which would try to import llama-index-embeddings-openai).
+        current = getattr(Settings, "_embed_model", None)
+        if not isinstance(current, FastEmbedEmbedding):
             _log.info(
-                "LlamaIndexEngine: loading embed model %s (first-time HF "
-                "download ~438 MB if not cached)",
+                "LlamaIndexEngine: loading embed model %s via FastEmbed/ONNX "
+                "(first-time download ~130 MB if not cached)",
                 _EMBED_MODEL,
             )
-            Settings.embed_model = HuggingFaceEmbedding(model_name=_EMBED_MODEL)
+            Settings.embed_model = FastEmbedEmbedding(model_name=_EMBED_MODEL)
         Settings.llm = None  # retrieval-only; LLM not needed
 
     # ── index build / load ────────────────────────────────────────────
